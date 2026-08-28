@@ -1,0 +1,347 @@
+# ⏰ AI Scheduled Monitoring Template
+#
+# This template provides continuous AI-powered monitoring of your application
+# with automatic issue creation and alert management.
+#
+# 📋 Variables to customize:
+# - {{ APP_NAME }}: Your application name
+# - {{ NAMESPACE }}: Kubernetes namespace
+# - {{ CLUSTER_NAME }}: EKS cluster name
+# - {{ AWS_REGION }}: AWS region
+# - {{ MONITORING_SCHEDULE }}: Cron schedule (default: every 6 hours)
+# - {{ HEALTH_THRESHOLD }}: Health threshold for alerts (recommended: 80)
+
+name: ⏰ AI Scheduled Monitoring - {{ APP_NAME }}
+
+on:
+  schedule:
+    # Run every 6 hours (customizable)
+    - cron: '{{ MONITORING_SCHEDULE | default("0 */6 * * *") }}'
+  
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to monitor'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+          - development
+          - all
+      
+      alert_threshold:
+        description: 'Health threshold for alerts'
+        required: false
+        default: '{{ HEALTH_THRESHOLD }}'
+        type: string
+      
+      create_issues:
+        description: 'Create GitHub issues for critical problems'
+        required: false
+        default: true
+        type: boolean
+      
+      notification_level:
+        description: 'Notification level'
+        required: false
+        default: 'critical'
+        type: choice
+        options:
+          - all
+          - critical
+          - none
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  scheduled-monitoring:
+    name: 🔍 Monitor ${{ matrix.environment }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: 
+          - ${{ github.event.inputs.environment == 'all' && 'production' || github.event.inputs.environment || 'production' }}
+          - ${{ github.event.inputs.environment == 'all' && 'staging' || '' }}
+          - ${{ github.event.inputs.environment == 'all' && 'development' || '' }}
+        exclude:
+          - environment: ''
+        include:
+          - environment: production
+            namespace: '{{ NAMESPACE }}-prod'
+            threshold: ${{ github.event.inputs.alert_threshold || '{{ HEALTH_THRESHOLD }}' }}
+            blocking: 'false'
+            
+          - environment: staging
+            namespace: '{{ NAMESPACE }}-staging'
+            threshold: ${{ github.event.inputs.alert_threshold || '75' }}
+            blocking: 'false'
+            
+          - environment: development
+            namespace: '{{ NAMESPACE }}-dev'
+            threshold: ${{ github.event.inputs.alert_threshold || '70' }}
+            blocking: 'false'
+    
+    outputs:
+      health-score: ${{ steps.health-monitor.outputs.health-score }}
+      critical-issues: ${{ steps.health-monitor.outputs.critical-issues }}
+      recommendation: ${{ steps.health-monitor.outputs.recommendation }}
+      environment: ${{ matrix.environment }}
+    
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: ⚙️ Configure AWS Credentials
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: {{ AWS_REGION }}
+      
+      - name: 🔍 AI Health Monitoring
+        id: health-monitor
+        uses: roxsross/ai-driven-devops@main
+        with:
+          # 📊 Monitoring configuration (non-blocking, informational)
+          simulation-mode: 'false'
+          blocking-mode: ${{ matrix.blocking }}
+          health-threshold: ${{ matrix.threshold }}
+          
+          # 🤖 AI Configuration
+          model-provider: 'bedrock'
+          bedrock-model-id: ${{ secrets.BEDROCK_MODEL_ID }}
+          
+          # 📊 Environment-specific monitoring
+          prometheus-url: ${{ secrets[format('PROMETHEUS_URL_{0}', upper(matrix.environment))] || secrets.PROMETHEUS_URL }}
+          grafana-url: ${{ secrets[format('GRAFANA_URL_{0}', upper(matrix.environment))] || secrets.GRAFANA_URL }}
+          grafana-token: ${{ secrets[format('GRAFANA_TOKEN_{0}', upper(matrix.environment))] || secrets.GRAFANA_TOKEN }}
+          
+          # 🎯 Application Configuration
+          namespace: ${{ matrix.namespace }}
+          app-name: '{{ APP_NAME }}'
+          cluster-name: '{{ CLUSTER_NAME }}'
+          
+          # 📱 Environment-specific notifications
+          telegram-bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          telegram-chat-id: ${{ secrets[format('TELEGRAM_CHAT_ID_{0}', upper(matrix.environment))] || secrets.TELEGRAM_CHAT_ID }}
+          
+          # 📋 CI/CD Context
+          ci-pipeline-id: ${{ github.run_id }}
+          ci-environment: 'scheduled-monitoring-${{ matrix.environment }}'
+          ci-commit-sha: ${{ github.sha }}
+      
+      - name: 📊 Generate Health Report
+        run: |
+          echo "## 🔍 Scheduled Health Report - ${{ matrix.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🏷️ Application | {{ APP_NAME }} | ℹ️ |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌍 Environment | ${{ matrix.environment }} | ℹ️ |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📦 Namespace | ${{ matrix.namespace }} | ℹ️ |" >> $GITHUB_STEP_SUMMARY
+          echo "| 💚 Health Score | ${{ steps.health-monitor.outputs.health-score }}/100 | $([ ${{ steps.health-monitor.outputs.health-score }} -ge ${{ matrix.threshold }} ] && echo '✅' || echo '⚠️') |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎯 Threshold | ${{ matrix.threshold }}% | ℹ️ |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🚨 Critical Issues | ${{ steps.health-monitor.outputs.critical-issues }} | $([ ${{ steps.health-monitor.outputs.critical-issues }} -eq 0 ] && echo '✅' || echo '🚨') |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🤖 Recommendation | ${{ steps.health-monitor.outputs.recommendation }} | $([ '${{ steps.health-monitor.outputs.recommendation }}' = 'deploy' ] && echo '✅' || echo '⚠️') |" >> $GITHUB_STEP_SUMMARY
+          echo "| ⏰ Timestamp | $(date -u) | ℹ️ |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Analysis:** ${{ steps.health-monitor.outputs.analysis-summary }}" >> $GITHUB_STEP_SUMMARY
+          
+          # Console output
+          echo "🕐 Scheduled Health Check Report"
+          echo "================================"
+          echo "🏷️ Application: {{ APP_NAME }}"
+          echo "🌍 Environment: ${{ matrix.environment }}"
+          echo "📊 Health Score: ${{ steps.health-monitor.outputs.health-score }}/100"
+          echo "🚨 Critical Issues: ${{ steps.health-monitor.outputs.critical-issues }}"
+          echo "🤖 Recommendation: ${{ steps.health-monitor.outputs.recommendation }}"
+          echo "⏰ Timestamp: $(date -u)"
+      
+      - name: 🚨 Create Critical Issue
+        if: |
+          steps.health-monitor.outputs.critical-issues > 0 && 
+          (github.event.inputs.create_issues == 'true' || github.event.inputs.create_issues == null)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const healthScore = '${{ steps.health-monitor.outputs.health-score }}';
+            const criticalIssues = '${{ steps.health-monitor.outputs.critical-issues }}';
+            const environment = '${{ matrix.environment }}';
+            const analysis = '${{ steps.health-monitor.outputs.analysis-summary }}';
+            const threshold = '${{ matrix.threshold }}';
+            
+            // Check for existing open issues
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: `ai-monitoring,critical,${environment}`,
+              state: 'open'
+            });
+            
+            const title = `🚨 Critical Health Issues - {{ APP_NAME }} (${environment})`;
+            
+            if (existingIssues.data.length === 0) {
+              // Create new critical issue
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: `
+                ## 🚨 AI Monitoring Alert - Critical Issues Detected
+                
+                **Application:** {{ APP_NAME }}
+                **Environment:** ${environment}
+                **Health Score:** ${healthScore}/100 (threshold: ${threshold}%)
+                **Critical Issues:** ${criticalIssues}
+                **Detection Time:** $(date -u)
+                
+                ### 📊 Health Analysis
+                ${analysis}
+                
+                ### 🔧 Immediate Actions Required
+                1. **🔍 Investigate**: Review system logs and metrics immediately
+                2. **📊 Analyze**: Check Grafana dashboards for anomalies
+                3. **🚨 Alert**: Notify on-call team if issues persist
+                4. **🔄 Monitor**: Track resolution progress
+                
+                ### 📈 Monitoring Resources
+                - [Grafana Dashboard](${{ secrets.GRAFANA_URL || 'Configure GRAFANA_URL' }})
+                - [Prometheus Metrics](${{ secrets.PROMETHEUS_URL || 'Configure PROMETHEUS_URL' }})
+                - [Pipeline Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+                
+                ### ⏰ Monitoring Schedule
+                - **Current**: Every 6 hours
+                - **Next Check**: $(date -u -d '+6 hours')
+                - **Auto-Resolution**: Issue will close when health improves
+                
+                ### 🎯 SLA Impact
+                ${parseInt(healthScore) < 70 ? 
+                  '🔴 **HIGH IMPACT** - Service degradation likely affecting users' : 
+                  '🟡 **MEDIUM IMPACT** - Performance issues detected, monitor closely'}
+                
+                ---
+                *🤖 Generated by AI Scheduled Monitoring | Next check: $(date -u -d '+6 hours')*
+                `,
+                labels: ['ai-monitoring', 'critical', environment, 'auto-generated', 'sla-impact'],
+                assignees: [] // Add default assignees if needed
+              });
+            } else {
+              // Update existing issue with latest status
+              const existingIssue = existingIssues.data[0];
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssue.number,
+                body: `
+                ## 🔄 Health Check Update - $(date -u)
+                
+                **Health Score:** ${healthScore}/100 (threshold: ${threshold}%)
+                **Critical Issues:** ${criticalIssues}
+                **Status:** Issues persist - requires immediate attention
+                
+                **Latest Analysis:**
+                ${analysis}
+                
+                ⚠️ **Critical issues are still present. Please prioritize resolution.**
+                
+                **Next automated check:** $(date -u -d '+6 hours')
+                `
+              });
+            }
+      
+      - name: ✅ Auto-close Resolved Issues
+        if: |
+          steps.health-monitor.outputs.critical-issues == 0 &&
+          steps.health-monitor.outputs.health-score >= matrix.threshold
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const environment = '${{ matrix.environment }}';
+            const healthScore = '${{ steps.health-monitor.outputs.health-score }}';
+            
+            // Find open critical issues for this environment
+            const openIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: `ai-monitoring,critical,${environment}`,
+              state: 'open'
+            });
+            
+            // Close resolved issues
+            for (const issue of openIssues.data) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+                state_reason: 'completed'
+              });
+              
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `
+                ## ✅ Issue Resolved - $(date -u)
+                
+                **Health Score:** ${healthScore}/100
+                **Critical Issues:** 0
+                **Status:** System health has been restored
+                
+                The critical issues have been resolved and system health is back to normal levels.
+                This issue is being automatically closed.
+                
+                **Final Analysis:**
+                ${{ steps.health-monitor.outputs.analysis-summary }}
+                
+                **Resolution Time:** $(date -u)
+                
+                ---
+                *🤖 Auto-resolved by AI Scheduled Monitoring*
+                `
+              });
+            }
+
+  # Consolidated monitoring summary
+  monitoring-summary:
+    name: 📋 Monitoring Summary
+    runs-on: ubuntu-latest
+    needs: [scheduled-monitoring]
+    if: always()
+    
+    steps:
+      - name: 📊 Create Monitoring Dashboard
+        run: |
+          echo "## ⏰ Scheduled Monitoring Summary" >> $GITHUB_STEP_SUMMARY
+          echo "### {{ APP_NAME }} - Health Status Overview" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Monitoring Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "**Next Check:** $(date -u -d '+6 hours')" >> $GITHUB_STEP_SUMMARY
+          echo "**Schedule:** {{ MONITORING_SCHEDULE | default('Every 6 hours') }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "| Environment | Health Score | Critical Issues | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|--------------|-----------------|--------|" >> $GITHUB_STEP_SUMMARY
+          
+          # Add results based on matrix execution
+          echo "| ${{ needs.scheduled-monitoring.outputs.environment || 'Production' }} | ${{ needs.scheduled-monitoring.outputs.health-score || 'N/A' }}% | ${{ needs.scheduled-monitoring.outputs.critical-issues || '0' }} | $([ '${{ needs.scheduled-monitoring.outputs.recommendation }}' = 'deploy' ] && echo '✅ Healthy' || echo '⚠️ Issues') |" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📈 Monitoring Insights" >> $GITHUB_STEP_SUMMARY
+          echo "- **Overall Status**: $([ '${{ needs.scheduled-monitoring.outputs.recommendation }}' = 'deploy' ] && echo '✅ System Healthy' || echo '⚠️ Attention Required')" >> $GITHUB_STEP_SUMMARY
+          echo "- **Monitoring Frequency**: {{ MONITORING_SCHEDULE | default('Every 6 hours') }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Auto-Issue Management**: ${{ github.event.inputs.create_issues || 'Enabled' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Notification Level**: ${{ github.event.inputs.notification_level || 'Critical' }}" >> $GITHUB_STEP_SUMMARY
+      
+      - name: 📱 Send Summary Notification
+        if: github.event.inputs.notification_level != 'none'
+        run: |
+          echo "📊 Monitoring summary completed for {{ APP_NAME }}"
+          echo "Overall health: ${{ needs.scheduled-monitoring.outputs.recommendation || 'Unknown' }}"
+          echo "Check GitHub Actions summary for detailed results"

@@ -1,0 +1,74 @@
+name: 🎭 Basic AI Observability Check
+
+# Perfect for testing the action without any infrastructure or secrets
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Allow manual triggering
+
+permissions:
+  contents: read
+  actions: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  ai-simulation-check:
+    name: 🎭 AI Health Check (Simulation)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🤖 AI Observability Check (No Secrets Needed)
+        id: ai-check
+        uses: roxsross/ai-driven-devops@main
+        with:
+          model-provider: 'openai'
+          simulation-mode: 'true'
+          namespace: 'my-app'
+          app-name: 'demo-application'
+          health-threshold: '70'
+          blocking-mode: 'false'  # Don't block deployments (testing mode)
+          
+          # 📊 CI/CD Context (automatically populated)
+          ci-pipeline-id: ${{ github.run_id }}
+          ci-environment: ${{ github.ref_name }}
+          ci-commit-sha: ${{ github.sha }}
+      
+      - name: 📊 Display Results
+        run: |
+          echo "## 🎭 AI Simulation Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 💚 Health Score | ${{ steps.ai-check.outputs.health-score }}% |" >> $GITHUB_STEP_SUMMARY
+          echo "| ⚠️ Critical Issues | ${{ steps.ai-check.outputs.critical-issues }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎯 Recommendation | ${{ steps.ai-check.outputs.recommendation }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📝 Analysis | ${{ steps.ai-check.outputs.analysis-summary }} |" >> $GITHUB_STEP_SUMMARY
+          
+          echo "🎭 Simulation completed successfully!"
+          echo "✅ No secrets or real infrastructure required"
+          echo "🚀 Ready to try with real AI providers!"
+      
+      - name: 💬 Comment on PR (if applicable)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `## 🤖 AI Observability Report
+            
+            **Health Score:** ${{ steps.ai-check.outputs.health-score }}%
+            **Critical Issues:** ${{ steps.ai-check.outputs.critical-issues }}
+            **Recommendation:** ${{ steps.ai-check.outputs.recommendation }}
+            
+            > 🎭 This is a simulation run - no real infrastructure was analyzed.
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })

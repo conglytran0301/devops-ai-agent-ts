@@ -1,0 +1,23 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nginx-demo-app-monitor
+  namespace: monitoring
+  labels:
+    app: nginx-demo
+    release: prometheus
+    app.kubernetes.io/name: nginx-demo
+    app.kubernetes.io/instance: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: nginx-demo
+  namespaceSelector:
+    matchNames:
+    - demo
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    scheme: http
+    honorLabels: true

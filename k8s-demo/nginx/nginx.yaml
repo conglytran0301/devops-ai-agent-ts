@@ -1,0 +1,339 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: demo
+data:
+  nginx.conf: |
+    events {
+        worker_connections 1024;
+    }
+    
+    http {
+        include       /etc/nginx/mime.types;
+        default_type  application/octet-stream;
+        
+        # Log format for better observability
+        log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                       '$status $body_bytes_sent "$http_referer" '
+                       '"$http_user_agent" "$http_x_forwarded_for" '
+                       'rt=$request_time uct="$upstream_connect_time" '
+                       'uht="$upstream_header_time" urt="$upstream_response_time"';
+        
+        access_log /var/log/nginx/access.log main;
+        error_log /var/log/nginx/error.log warn;
+        
+        sendfile on;
+        tcp_nopush on;
+        tcp_nodelay on;
+        keepalive_timeout 65;
+        types_hash_max_size 2048;
+        
+        # Main application server with all endpoints
+        server {
+            listen 80;
+            server_name _;
+            root /usr/share/nginx/html;
+            index index.html index.htm;
+            
+            # Health check endpoint
+            location /health {
+                access_log off;
+                return 200 "healthy\n";
+                add_header Content-Type text/plain;
+            }
+            
+            # Nginx status for prometheus exporter
+            location /nginx_status {
+                stub_status on;
+                access_log off;
+                allow all;
+                # Ensure it returns proper content type
+                add_header Content-Type text/plain;
+            }
+            
+            # Custom metrics endpoint
+            location /metrics {
+                access_log off;
+                return 200 "# Nginx metrics endpoint\nnginx_up 1\n";
+                add_header Content-Type text/plain;
+            }
+            
+            # Debug endpoint for exporter
+            location /debug {
+                access_log off;
+                return 200 "nginx_status: http://localhost:80/nginx_status\nexporter: http://localhost:9113/metrics\n";
+                add_header Content-Type text/plain;
+            }
+            
+            # Main application
+            location / {
+                try_files $uri $uri/ =404;
+            }
+            
+            # Error pages
+            error_page 404 /404.html;
+            error_page 500 502 503 504 /50x.html;
+            
+            location = /50x.html {
+                root /usr/share/nginx/html;
+            }
+        }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: html-content
+  namespace: demo
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>AI Observability Demo</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+            }
+            
+            .container {
+                background: white;
+                border-radius: 16px;
+                padding: 50px 40px;
+                max-width: 500px;
+                width: 100%;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                text-align: center;
+            }
+            
+            h1 {
+                font-size: 32px;
+                margin-bottom: 10px;
+                color: #2d3748;
+            }
+            
+            .subtitle {
+                color: #718096;
+                margin-bottom: 30px;
+                font-size: 14px;
+            }
+            
+            .status {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                padding: 16px 20px;
+                background: #f0fdf4;
+                border-left: 4px solid #22c55e;
+                border-radius: 8px;
+                margin-bottom: 30px;
+            }
+            
+            .status-dot {
+                width: 12px;
+                height: 12px;
+                background: #22c55e;
+                border-radius: 50%;
+                animation: pulse 2s infinite;
+            }
+            
+            @keyframes pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.5; }
+            }
+            
+            .status-text {
+                font-weight: 600;
+                color: #166534;
+            }
+            
+            h2 {
+                font-size: 18px;
+                margin-bottom: 16px;
+                color: #2d3748;
+            }
+            
+            .info {
+                text-align: center;
+                color: #4a5568;
+                line-height: 1.6;
+            }
+            
+            .footer {
+                margin-top: 30px;
+                padding-top: 20px;
+                border-top: 2px solid #e2e8f0;
+                text-align: center;
+                color: #718096;
+                font-size: 14px;
+            }
+            
+            .badge {
+                display: inline-block;
+                padding: 4px 12px;
+                background: #667eea;
+                color: white;
+                border-radius: 12px;
+                font-size: 12px;
+                font-weight: 600;
+                margin-top: 8px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🤖 AI Observability</h1>
+            <p class="subtitle">AWS re:Invent 2025 Demo</p>
+            
+            <div class="status">
+                <div class="status-dot"></div>
+                <span class="status-text">System Healthy</span>
+            </div>
+            
+            <div class="info">
+                <p>Real-time monitoring powered by multi-provider AI</p>
+                <p>Analyzing Kubernetes and Nginx metrics for intelligent decisions</p>
+            </div>
+            
+            <div class="footer">
+                <strong>Monitored by</strong>
+                <div class="badge">AI DRIVEN DEVOPS</div>
+            </div>
+        </div>
+    </body>
+    </html>
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-demo
+  namespace: demo
+  labels:
+    app: nginx-demo
+    scenario: normal
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx-demo
+  template:
+    metadata:
+      labels:
+        app: nginx-demo
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9113"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.25-alpine
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+        - name: html-content
+          mountPath: /usr/share/nginx/html
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      - name: nginx-exporter
+        image: nginx/nginx-prometheus-exporter:0.11.0
+        ports:
+        - containerPort: 9113
+        args:
+        - -nginx.scrape-uri=http://localhost:80/nginx_status
+        - -web.listen-address=:9113
+        - -web.telemetry-path=/metrics
+        - -nginx.timeout=5s
+        - -nginx.retry-interval=5s
+        env:
+        - name: NGINX_EXPORTER_LOG_LEVEL
+          value: "info"
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "10m"
+          limits:
+            memory: "64Mi"
+            cpu: "50m"
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9113
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: 9113
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: nginx-config
+      - name: html-content
+        configMap:
+          name: html-content
+
+--- 
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-demo-service
+  namespace: demo
+  labels:
+    app: nginx-demo
+    release: prometheus  # For ServiceMonitor selector
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9113"
+    prometheus.io/path: "/metrics"
+spec:
+  selector:
+    app: nginx-demo
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+    protocol: TCP
+  - name: metrics
+    port: 9113
+    targetPort: 9113
+    protocol: TCP
+  type: ClusterIP

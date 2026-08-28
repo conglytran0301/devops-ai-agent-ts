@@ -1,0 +1,141 @@
+name: 🚀 AI Deployment Gate (Production)
+
+# 🎯 Only run on main branch pushes (production deployments)
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # Allow manual triggering
+    inputs:
+      force_deploy:
+        description: 'Force deployment even if AI blocks'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+  deployments: write
+
+jobs:
+  ai-deployment-gate:
+    name: 🚀 AI Production Gate
+    runs-on: ubuntu-latest
+    environment: production  # Use GitHub environment protection
+    outputs:
+      health-score: ${{ steps.ai-gate.outputs.health-score }}
+      recommendation: ${{ steps.ai-gate.outputs.recommendation }}
+      critical-issues: ${{ steps.ai-gate.outputs.critical-issues }}
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: ⚙️ Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      
+      - name: 🤖 AI Observability Gate
+        id: ai-gate
+        uses: roxsross/ai-driven-devops@main
+        with:
+          # 🏭 Production Configuration
+          model-provider: 'bedrock'
+          bedrock-model-id: 'amazon.nova-pro-v1:0'
+          simulation-mode: 'false'
+          blocking-mode: 'true'
+          health-threshold: '85'  # Strict threshold for production
+          
+          # 📊 Monitoring Integration
+          prometheus-url: ${{ secrets.PROMETHEUS_URL }}
+          grafana-url: ${{ secrets.GRAFANA_URL }}
+          grafana-token: ${{ secrets.GRAFANA_TOKEN }}
+          
+          # 🎯 Application Configuration
+          namespace: 'production'
+          app-name: 'my-production-app'
+          cluster-name: ${{ secrets.EKS_CLUSTER_NAME }}
+          
+          # 📱 Notifications
+          telegram-bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          telegram-chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          
+          # 📋 CI/CD Context
+          ci-pipeline-id: ${{ github.run_id }}
+          ci-environment: 'production'
+          ci-commit-sha: ${{ github.sha }}
+      
+      - name: 📊 Create Deployment Summary
+        run: |
+          echo "## 🚀 Production Deployment Gate Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 💚 Health Score | ${{ steps.ai-gate.outputs.health-score }}% | $([ ${{ steps.ai-gate.outputs.health-score }} -ge 85 ] && echo '✅ Pass' || echo '❌ Fail') |" >> $GITHUB_STEP_SUMMARY
+          echo "| ⚠️ Critical Issues | ${{ steps.ai-gate.outputs.critical-issues }} | $([ ${{ steps.ai-gate.outputs.critical-issues }} -eq 0 ] && echo '✅ None' || echo '⚠️ Found') |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎯 AI Recommendation | ${{ steps.ai-gate.outputs.recommendation }} | $([ '${{ steps.ai-gate.outputs.recommendation }}' = 'deploy' ] && echo '✅ Deploy' || echo '🚫 Block') |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Analysis:** ${{ steps.ai-gate.outputs.analysis-summary }}" >> $GITHUB_STEP_SUMMARY
+
+  deploy-to-production:
+    name: 🚀 Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [ai-deployment-gate]
+    if: needs.ai-deployment-gate.outputs.recommendation == 'deploy' || github.event.inputs.force_deploy == 'true'
+    environment: production
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: ⚙️ Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      
+      - name: 🚀 Deploy Application
+        run: |
+          echo "✅ AI approved deployment!"
+          echo "Health Score: ${{ needs.ai-deployment-gate.outputs.health-score }}%"
+          echo "Critical Issues: ${{ needs.ai-deployment-gate.outputs.critical-issues }}"
+          
+          # 🔧 Add your deployment commands here:
+          # kubectl apply -f k8s/production/
+          # helm upgrade my-app ./chart --namespace production
+          # aws ecs update-service --cluster prod --service my-app
+          
+          echo "🎉 Deployment completed successfully!"
+      
+      - name: 📱 Notify Success
+        if: success()
+        run: |
+          echo "🎉 Production deployment successful!"
+          echo "Commit: ${{ github.sha }}"
+          echo "Health Score: ${{ needs.ai-deployment-gate.outputs.health-score }}%"
+
+  handle-blocked-deployment:
+    name: 🚫 Handle Blocked Deployment
+    runs-on: ubuntu-latest
+    needs: [ai-deployment-gate]
+    if: needs.ai-deployment-gate.outputs.recommendation == 'block' && github.event.inputs.force_deploy != 'true'
+    steps:
+      - name: 🚫 Deployment Blocked
+        run: |
+          echo "## 🚫 Deployment Blocked by AI" >> $GITHUB_STEP_SUMMARY
+          echo "The AI system has blocked this deployment due to health concerns." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Health Score:** ${{ needs.ai-deployment-gate.outputs.health-score }}% (threshold: 85%)" >> $GITHUB_STEP_SUMMARY
+          echo "**Critical Issues:** ${{ needs.ai-deployment-gate.outputs.critical-issues }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔧 Next Steps:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Review the critical issues identified" >> $GITHUB_STEP_SUMMARY
+          echo "2. Fix the underlying problems" >> $GITHUB_STEP_SUMMARY
+          echo "3. Re-run the deployment" >> $GITHUB_STEP_SUMMARY
+          echo "4. Or use manual override if necessary" >> $GITHUB_STEP_SUMMARY
+          
+          echo "❌ AI blocked deployment due to health issues"
+          echo "Health Score: ${{ needs.ai-deployment-gate.outputs.health-score }}%"
+          echo "Critical Issues: ${{ needs.ai-deployment-gate.outputs.critical-issues }}"
+          exit 1

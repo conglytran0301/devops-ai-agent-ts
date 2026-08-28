@@ -1,0 +1,235 @@
+# 🔍 AI Pull Request Check Template
+#
+# This template provides AI-powered analysis for Pull Requests to detect
+# potential issues before merge and ensure code quality.
+#
+# 📋 Variables to customize:
+# - {{ APP_NAME }}: Your application name
+# - {{ NAMESPACE }}: Kubernetes namespace
+# - {{ CLUSTER_NAME }}: EKS cluster name
+# - {{ AWS_REGION }}: AWS region
+# - {{ HEALTH_THRESHOLD }}: Health threshold for PR checks (recommended: 70)
+
+name: 🔍 AI Pull Request Check - {{ APP_NAME }}
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+    types: [opened, synchronize, reopened]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+  issues: write
+
+jobs:
+  ai-pr-analysis:
+    name: 🤖 AI PR Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout PR Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      
+      - name: ⚙️ Configure AWS Credentials
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: {{ AWS_REGION }}
+      
+      - name: 🤖 AI Observability Analysis
+        id: ai-analysis
+        uses: roxsross/ai-driven-devops@main
+        with:
+          # 🎯 PR-specific configuration (non-blocking, informational)
+          simulation-mode: 'true'
+          blocking-mode: 'false'
+          health-threshold: '{{ HEALTH_THRESHOLD }}'
+          
+          # 🤖 AI Configuration
+          model-provider: 'bedrock'
+          bedrock-model-id: ${{ secrets.BEDROCK_MODEL_ID }}
+          
+          # 📊 Monitoring Integration (optional for PRs)
+          prometheus-url: ${{ secrets.PROMETHEUS_URL }}
+          grafana-url: ${{ secrets.GRAFANA_URL }}
+          grafana-token: ${{ secrets.GRAFANA_TOKEN }}
+          
+          # 🎯 Application Configuration
+          namespace: '{{ NAMESPACE }}'
+          app-name: '{{ APP_NAME }}'
+          cluster-name: '{{ CLUSTER_NAME }}'
+          
+          # 📋 CI/CD Context
+          ci-pipeline-id: ${{ github.run_id }}
+          ci-environment: 'pr-${{ github.event.number }}'
+          ci-commit-sha: ${{ github.event.pull_request.head.sha }}
+      
+      - name: 📊 Create PR Check Status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const healthScore = parseInt('${{ steps.ai-analysis.outputs.health-score }}');
+            const criticalIssues = parseInt('${{ steps.ai-analysis.outputs.critical-issues }}');
+            const recommendation = '${{ steps.ai-analysis.outputs.recommendation }}';
+            const threshold = parseInt('{{ HEALTH_THRESHOLD }}');
+            
+            const conclusion = (recommendation === 'deploy' && healthScore >= threshold) ? 'success' : 'neutral';
+            const title = conclusion === 'success' 
+              ? `✅ AI Analysis Passed (${healthScore}%)`
+              : `⚠️ AI Analysis Needs Review (${healthScore}%)`;
+            
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'AI Observability Analysis',
+              head_sha: '${{ github.event.pull_request.head.sha }}',
+              status: 'completed',
+              conclusion: conclusion,
+              output: {
+                title: title,
+                summary: `Health Score: ${healthScore}% | Critical Issues: ${criticalIssues} | Threshold: ${threshold}%`,
+                text: `${{ steps.ai-analysis.outputs.analysis-summary }}`
+              }
+            });
+      
+      - name: 💬 Update PR Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const healthScore = '${{ steps.ai-analysis.outputs.health-score }}';
+            const criticalIssues = '${{ steps.ai-analysis.outputs.critical-issues }}';
+            const recommendation = '${{ steps.ai-analysis.outputs.recommendation }}';
+            const analysis = '${{ steps.ai-analysis.outputs.analysis-summary }}';
+            const threshold = '{{ HEALTH_THRESHOLD }}';
+            
+            // Determine status and styling
+            const isHealthy = recommendation === 'deploy' && parseInt(healthScore) >= parseInt(threshold);
+            const emoji = isHealthy ? '✅' : '⚠️';
+            const status = isHealthy ? 'PASSED' : 'NEEDS REVIEW';
+            const statusColor = isHealthy ? '🟢' : '🟡';
+            
+            // Risk assessment
+            let riskLevel = '🟢 Low Risk';
+            let riskDescription = 'Changes appear safe for deployment';
+            
+            if (parseInt(criticalIssues) > 0) {
+              riskLevel = '🔴 High Risk';
+              riskDescription = 'Critical issues detected that require attention';
+            } else if (parseInt(healthScore) < 80) {
+              riskLevel = '🟡 Medium Risk';
+              riskDescription = 'Some concerns identified, review recommended';
+            }
+            
+            const body = `
+            ## ${emoji} AI Observability Analysis - ${status}
+            
+            ### 📊 Analysis Results
+            | Metric | Value | Status |
+            |--------|-------|--------|
+            | 🏷️ Application | {{ APP_NAME }} | ℹ️ |
+            | 💚 Health Score | ${healthScore}/100 | ${statusColor} |
+            | 🎯 Threshold | ${threshold}% | ℹ️ |
+            | 🚨 Critical Issues | ${criticalIssues} | ${criticalIssues === '0' ? '✅' : '⚠️'} |
+            | 🎯 Risk Level | ${riskLevel} | ${statusColor} |
+            | 🤖 Recommendation | ${recommendation.toUpperCase()} | ${emoji} |
+            
+            ### 🔍 Risk Assessment
+            **${riskLevel}** - ${riskDescription}
+            
+            ### 📋 AI Analysis Summary
+            ${analysis}
+            
+            ### 💡 Recommendations
+            ${isHealthy ? 
+              '🎉 **Excellent work!** Your changes maintain high system health and are ready for review.' : 
+              '🔧 **Action needed:** Please review the identified issues to improve system reliability.'}
+            
+            ---
+            <details>
+            <summary>🔧 Technical Details</summary>
+            
+            - **PR**: #${{ github.event.number }}
+            - **Commit**: \`${{ github.event.pull_request.head.sha }}\`
+            - **Branch**: \`${{ github.event.pull_request.head.ref }}\`
+            - **Environment**: PR Preview
+            - **Analysis Time**: $(date -u)
+            - **Pipeline**: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            </details>
+            
+            *🤖 Powered by [AI-Driven Observability](https://github.com/roxsross/ai-driven-devops)*
+            `;
+            
+            // Find and update existing comment or create new one
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.data.find(comment => 
+              comment.body.includes('AI Observability Analysis') && 
+              comment.user.type === 'Bot'
+            );
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+      
+      - name: 🎯 Auto-approve High Quality PRs
+        if: |
+          steps.ai-analysis.outputs.health-score >= 90 &&
+          steps.ai-analysis.outputs.critical-issues == 0 &&
+          github.event.pull_request.user.login != 'dependabot[bot]'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              event: 'APPROVE',
+              body: `🤖 **Auto-approved by AI Observability**
+              
+              This PR demonstrates excellent health metrics:
+              - ✅ Health Score: ${{ steps.ai-analysis.outputs.health-score }}/100
+              - ✅ Critical Issues: 0
+              - ✅ AI Recommendation: DEPLOY
+              
+              The changes maintain high system reliability and are safe for deployment.
+              
+              *Automated approval based on AI analysis*`
+            });
+      
+      - name: 📈 Generate PR Summary
+        run: |
+          echo "## 🔍 AI PR Analysis Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🏷️ Application | {{ APP_NAME }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📝 PR Number | #${{ github.event.number }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 💚 Health Score | ${{ steps.ai-analysis.outputs.health-score }}/100 |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎯 Threshold | {{ HEALTH_THRESHOLD }}% |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🚨 Critical Issues | ${{ steps.ai-analysis.outputs.critical-issues }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🤖 Recommendation | ${{ steps.ai-analysis.outputs.recommendation }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Analysis:** ${{ steps.ai-analysis.outputs.analysis-summary }}" >> $GITHUB_STEP_SUMMARY

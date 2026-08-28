@@ -1,0 +1,375 @@
+# 🚀 AI Post-Deployment Validation Template
+#
+# This template provides AI-powered validation after deployment to ensure
+# the system is healthy and performing as expected.
+#
+# 📋 Variables to customize:
+# - {{ APP_NAME }}: Your application name
+# - {{ NAMESPACE }}: Kubernetes namespace
+# - {{ CLUSTER_NAME }}: EKS cluster name
+# - {{ AWS_REGION }}: AWS region
+# - {{ HEALTH_THRESHOLD }}: Health threshold for validation (recommended: 85)
+# - {{ VALIDATION_DURATION }}: How long to monitor after deployment (default: 5 minutes)
+
+name: 🚀 AI Post-Deployment Validation - {{ APP_NAME }}
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Deployment Environment'
+        required: false
+        type: string
+        default: 'production'
+      
+      validation-duration:
+        description: 'Validation Duration in Minutes'
+        required: false
+        type: string
+        default: '{{ VALIDATION_DURATION | default("5") }}'
+      
+      deployment-id:
+        description: 'Deployment ID for tracking'
+        required: false
+        type: string
+      
+      rollback-on-failure:
+        description: 'Automatically rollback on validation failure'
+        required: false
+        type: boolean
+        default: false
+      
+      health-threshold:
+        description: 'Health threshold for validation'
+        required: false
+        type: string
+        default: '{{ HEALTH_THRESHOLD }}'
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to validate'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+          - development
+      
+      validation-duration:
+        description: 'Validation duration (minutes)'
+        required: false
+        default: '{{ VALIDATION_DURATION | default("5") }}'
+        type: string
+      
+      rollback-on-failure:
+        description: 'Rollback on validation failure'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  deployments: write
+  issues: write
+  actions: read
+
+env:
+  APP_NAME: {{ APP_NAME }}
+  NAMESPACE: {{ NAMESPACE }}
+  CLUSTER_NAME: {{ CLUSTER_NAME }}
+  AWS_REGION: {{ AWS_REGION }}
+
+jobs:
+  post-deployment-validation:
+    name: 🔍 Post-Deploy Validation
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    
+    outputs:
+      health-score: ${{ steps.ai-validation.outputs.health-score }}
+      recommendation: ${{ steps.ai-validation.outputs.recommendation }}
+      critical-issues: ${{ steps.ai-validation.outputs.critical-issues }}
+      validation-status: ${{ steps.validation-result.outputs.status }}
+    
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: ⚙️ Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: ⏳ Wait for Deployment Stabilization
+        run: |
+          echo "🕐 Waiting for deployment to stabilize..."
+          echo "Validation will begin in 30 seconds to allow metrics to populate"
+          sleep 30
+      
+      - name: 🤖 AI Post-Deployment Validation
+        id: ai-validation
+        uses: roxsross/ai-driven-devops@main
+        with:
+          # 🎯 Post-deployment specific configuration
+          simulation-mode: 'false'
+          blocking-mode: 'false'
+          health-threshold: ${{ inputs.health-threshold || '{{ HEALTH_THRESHOLD }}' }}
+          validation-context: 'post-deployment'
+          
+          # 🤖 AI Configuration
+          model-provider: 'bedrock'
+          bedrock-model-id: ${{ secrets.BEDROCK_MODEL_ID }}
+          
+          # 📊 Monitoring Integration
+          prometheus-url: ${{ secrets[format('PROMETHEUS_URL_{0}', upper(inputs.environment))] || secrets.PROMETHEUS_URL }}
+          grafana-url: ${{ secrets[format('GRAFANA_URL_{0}', upper(inputs.environment))] || secrets.GRAFANA_URL }}
+          grafana-token: ${{ secrets[format('GRAFANA_TOKEN_{0}', upper(inputs.environment))] || secrets.GRAFANA_TOKEN }}
+          
+          # 🎯 Application Configuration
+          namespace: ${{ env.NAMESPACE }}-${{ inputs.environment }}
+          app-name: ${{ env.APP_NAME }}
+          cluster-name: ${{ env.CLUSTER_NAME }}
+          
+          # 📱 Notifications
+          telegram-bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          telegram-chat-id: ${{ secrets[format('TELEGRAM_CHAT_ID_{0}', upper(inputs.environment))] || secrets.TELEGRAM_CHAT_ID }}
+          
+          # 📋 CI/CD Context
+          ci-pipeline-id: ${{ github.run_id }}
+          ci-environment: ${{ inputs.environment }}
+          ci-commit-sha: ${{ github.sha }}
+      
+      - name: ⏱️ Extended Validation Period
+        if: inputs.validation-duration > 1
+        run: |
+          duration=${{ inputs.validation-duration }}
+          echo "🔍 Running extended validation for ${duration} minutes..."
+          
+          # Monitor for the specified duration
+          end_time=$(($(date +%s) + duration * 60))
+          
+          while [ $(date +%s) -lt $end_time ]; do
+            remaining=$((($end_time - $(date +%s)) / 60))
+            echo "⏳ Monitoring... ${remaining} minutes remaining"
+            sleep 60
+          done
+          
+          echo "✅ Extended validation period completed"
+      
+      - name: 📊 Determine Validation Result
+        id: validation-result
+        run: |
+          health_score="${{ steps.ai-validation.outputs.health-score }}"
+          critical_issues="${{ steps.ai-validation.outputs.critical-issues }}"
+          recommendation="${{ steps.ai-validation.outputs.recommendation }}"
+          threshold="${{ inputs.health-threshold || '{{ HEALTH_THRESHOLD }}' }}"
+          
+          echo "🔍 Validation Results:"
+          echo "Health Score: ${health_score}%"
+          echo "Critical Issues: ${critical_issues}"
+          echo "Recommendation: ${recommendation}"
+          echo "Threshold: ${threshold}%"
+          
+          # Determine overall validation status
+          if [ "${recommendation}" = "deploy" ] && [ "${health_score%.*}" -ge "${threshold%.*}" ] && [ "${critical_issues}" -eq "0" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "✅ VALIDATION PASSED - Deployment is healthy"
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "❌ VALIDATION FAILED - Issues detected"
+          fi
+      
+      - name: 📋 Create Deployment Report
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const healthScore = '${{ steps.ai-validation.outputs.health-score }}';
+            const recommendation = '${{ steps.ai-validation.outputs.recommendation }}';
+            const criticalIssues = '${{ steps.ai-validation.outputs.critical-issues }}';
+            const environment = '${{ inputs.environment }}';
+            const deploymentId = '${{ inputs.deployment-id }}' || `auto-${Date.now()}`;
+            const validationDuration = '${{ inputs.validation-duration }}';
+            const validationStatus = '${{ steps.validation-result.outputs.status }}';
+            const analysis = '${{ steps.ai-validation.outputs.analysis-summary }}';
+            const threshold = '${{ inputs.health-threshold || "{{ HEALTH_THRESHOLD }}" }}';
+            
+            // Determine status styling
+            const isSuccess = validationStatus === 'success';
+            const emoji = isSuccess ? '✅' : '❌';
+            const status = isSuccess ? 'DEPLOYMENT SUCCESSFUL' : 'DEPLOYMENT VALIDATION FAILED';
+            const statusColor = isSuccess ? '🟢' : '🔴';
+            
+            // Performance assessment
+            let performanceLevel = '🟢 Excellent';
+            let performanceDescription = 'System performing optimally';
+            
+            if (parseInt(criticalIssues) > 0) {
+              performanceLevel = '🔴 Critical Issues';
+              performanceDescription = 'Critical issues detected requiring immediate attention';
+            } else if (parseInt(healthScore) < 80) {
+              performanceLevel = '🟡 Degraded';
+              performanceDescription = 'Performance below optimal levels';
+            } else if (parseInt(healthScore) < 90) {
+              performanceLevel = '🟠 Good';
+              performanceDescription = 'Good performance with room for improvement';
+            }
+            
+            const body = `## ${emoji} Post-Deployment Validation - ${status}
+            
+            **🎯 {{ APP_NAME }} Deployment Report**
+            
+            ### 📊 Validation Results
+            | Metric | Value | Status |
+            |--------|-------|--------|
+            | 🏷️ Application | {{ APP_NAME }} | ℹ️ |
+            | 🌍 Environment | ${environment} | ℹ️ |
+            | 💚 Health Score | ${healthScore}/100 | ${statusColor} |
+            | 🎯 Threshold | ${threshold}% | ℹ️ |
+            | 🚨 Critical Issues | ${criticalIssues} | ${criticalIssues === '0' ? '✅' : '🔴'} |
+            | ⏱️ Validation Duration | ${validationDuration} min | ℹ️ |
+            | 🎯 Performance Level | ${performanceLevel} | ${statusColor} |
+            | 🤖 AI Recommendation | ${recommendation.toUpperCase()} | ${emoji} |
+            
+            ### 🔍 Performance Assessment
+            **${performanceLevel}** - ${performanceDescription}
+            
+            ### 📋 AI Analysis Summary
+            ${analysis}
+            
+            ### 🚀 Deployment Details
+            - **Deployment ID:** \`${deploymentId}\`
+            - **Environment:** ${environment}
+            - **Validation Time:** $(date -u)
+            - **Commit SHA:** \`${{ github.sha }}\`
+            - **Pipeline:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            
+            ### 📈 Monitoring Resources
+            - [Live Dashboard](${{ secrets.GRAFANA_URL || 'Configure GRAFANA_URL' }})
+            - [Metrics](${{ secrets.PROMETHEUS_URL || 'Configure PROMETHEUS_URL' }})
+            
+            ### 🔄 Next Steps
+            ${isSuccess ? 
+              '- ✅ Deployment validated successfully\\n- 📊 Continue normal monitoring\\n- 🎯 System ready for production traffic' : 
+              '- 🔍 Investigate performance issues immediately\\n- 📊 Review metrics and logs\\n- 🔄 Consider rollback if issues persist\\n- 🚨 Alert on-call team if critical'}
+            
+            ### 📱 Notifications
+            ${isSuccess ? 
+              '🎉 **Success notifications sent to team**' : 
+              '🚨 **Alert notifications sent to on-call team**'}
+            
+            ---
+            *🤖 Generated by AI Post-Deployment Validation | Duration: ${validationDuration}min | Status: ${status}*`;
+            
+            // Create deployment report issue
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `${emoji} Post-Deploy Validation: {{ APP_NAME }} (${environment}) - ${status}`,
+              body: body,
+              labels: [
+                'deployment', 
+                'post-validation', 
+                environment, 
+                isSuccess ? 'success' : 'failure',
+                'ai-validation'
+              ]
+            });
+      
+      - name: 🔄 Trigger Rollback on Failure
+        if: |
+          steps.validation-result.outputs.status == 'failure' &&
+          inputs.rollback-on-failure == true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Create rollback issue
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🔄 Auto-Rollback Triggered - {{ APP_NAME }} (${{ inputs.environment }})`,
+              body: `
+              ## 🔄 Automatic Rollback Initiated
+              
+              **Reason:** Post-deployment validation failed
+              **Application:** {{ APP_NAME }}
+              **Environment:** ${{ inputs.environment }}
+              **Health Score:** ${{ steps.ai-validation.outputs.health-score }}%
+              **Critical Issues:** ${{ steps.ai-validation.outputs.critical-issues }}
+              
+              ### 🚨 Validation Failure Details
+              ${{ steps.ai-validation.outputs.analysis-summary }}
+              
+              ### 🔄 Rollback Actions
+              - [ ] Revert to previous deployment
+              - [ ] Verify system health post-rollback
+              - [ ] Notify development team
+              - [ ] Schedule post-mortem
+              
+              **Triggered by:** AI Post-Deployment Validation
+              **Pipeline:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+              
+              ---
+              *🤖 Auto-generated rollback request*
+              `,
+              labels: ['rollback', 'auto-generated', 'critical', '${{ inputs.environment }}']
+            });
+            
+            // Here you would add your actual rollback logic
+            // For example:
+            // - kubectl rollout undo deployment/{{ APP_NAME }} -n {{ NAMESPACE }}-${{ inputs.environment }}
+            // - helm rollback {{ APP_NAME }} -n {{ NAMESPACE }}-${{ inputs.environment }}
+            // - aws ecs update-service --cluster {{ CLUSTER_NAME }} --service {{ APP_NAME }} --task-definition previous-version
+            
+            console.log('🔄 Rollback process initiated due to validation failure');
+      
+      - name: 📈 Update Deployment Status
+        run: |
+          echo "## 🚀 Post-Deployment Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🏷️ Application | {{ APP_NAME }} | ℹ️ |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌍 Environment | ${{ inputs.environment }} | ℹ️ |" >> $GITHUB_STEP_SUMMARY
+          echo "| 💚 Health Score | ${{ steps.ai-validation.outputs.health-score }}/100 | $([ '${{ steps.validation-result.outputs.status }}' = 'success' ] && echo '✅' || echo '❌') |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎯 Threshold | ${{ inputs.health-threshold || '{{ HEALTH_THRESHOLD }}' }}% | ℹ️ |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🚨 Critical Issues | ${{ steps.ai-validation.outputs.critical-issues }} | $([ ${{ steps.ai-validation.outputs.critical-issues }} -eq 0 ] && echo '✅' || echo '❌') |" >> $GITHUB_STEP_SUMMARY
+          echo "| ⏱️ Duration | ${{ inputs.validation-duration }} min | ℹ️ |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎯 Final Status | ${{ steps.validation-result.outputs.status }} | $([ '${{ steps.validation-result.outputs.status }}' = 'success' ] && echo '✅' || echo '❌') |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔄 Auto-Rollback | ${{ inputs.rollback-on-failure }} | $([ '${{ inputs.rollback-on-failure }}' = 'true' ] && echo '🔄' || echo '➖') |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Analysis:** ${{ steps.ai-validation.outputs.analysis-summary }}" >> $GITHUB_STEP_SUMMARY
+          
+          # Set final exit code
+          if [ "${{ steps.validation-result.outputs.status }}" = "success" ]; then
+            echo "✅ Post-deployment validation PASSED"
+            exit 0
+          else
+            echo "❌ Post-deployment validation FAILED"
+            exit 1
+          fi
+
+  # Notification job for validation results
+  notify-validation-results:
+    name: 📱 Notify Results
+    runs-on: ubuntu-latest
+    needs: [post-deployment-validation]
+    if: always()
+    
+    steps:
+      - name: 📱 Send Success Notification
+        if: needs.post-deployment-validation.outputs.validation-status == 'success'
+        run: |
+          echo "🎉 Deployment validation successful!"
+          echo "{{ APP_NAME }} is healthy in ${{ inputs.environment }}"
+          echo "Health Score: ${{ needs.post-deployment-validation.outputs.health-score }}%"
+      
+      - name: 🚨 Send Failure Notification
+        if: needs.post-deployment-validation.outputs.validation-status == 'failure'
+        run: |
+          echo "❌ Deployment validation failed!"
+          echo "{{ APP_NAME }} has issues in ${{ inputs.environment }}"
+          echo "Health Score: ${{ needs.post-deployment-validation.outputs.health-score }}%"
+          echo "Critical Issues: ${{ needs.post-deployment-validation.outputs.critical-issues }}"

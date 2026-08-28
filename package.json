@@ -1,0 +1,21 @@
+{
+  "name": "ai-driven-devops",
+  "version": "1.0.0",
+  "description": "AI-Driven Observability GitHub Action (TypeScript)",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@kubernetes/client-node": "^2.0.0",
+    "@strands-agents/sdk": "^1.4.0",
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.5.0"
+  }
+}

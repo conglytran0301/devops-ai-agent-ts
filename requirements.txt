@@ -1,0 +1,17 @@
+# AI Agent Core
+strands-agents==1.9.1
+strands-agents-tools==0.2.8
+
+# AI Providers
+anthropic==0.68.0
+openai>=1.0.0
+boto3>=1.28.0
+
+# Kubernetes
+kubernetes>=29.0.0
+
+# Core Dependencies
+python-dotenv>=1.0.0
+requests>=2.32.3
+
+prometheus-client==0.23.1

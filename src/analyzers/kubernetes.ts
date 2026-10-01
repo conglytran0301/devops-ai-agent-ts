@@ -48,13 +48,14 @@ export interface HealthAnalysis {
 export async function initializeKubernetesClient(): Promise<K8sClients | null> {
   try {
     const kc = new KubeConfig();
-    try {
+
+    if (process.env.KUBERNETES_SERVICE_HOST) {
       kc.loadFromCluster();
-      logger.info("Using in-cluster configuration");
-    } catch {
+      logger.k8s("Using in-cluster configuration");
+    } else {
       try {
         kc.loadFromDefault();
-        logger.info("Using kubeconfig file");
+        logger.k8s("Using kubeconfig file");
       } catch {
         logger.error("Kubernetes: No valid configuration found");
         return null;
@@ -65,7 +66,7 @@ export async function initializeKubernetesClient(): Promise<K8sClients | null> {
     const appsV1 = kc.makeApiClient(AppsV1Api);
 
     await coreV1.listNamespace({ limit: 1 });
-    logger.info("API connection successful");
+    logger.k8s("API connection successful");
     return { coreV1, appsV1 };
   } catch (error) {
     logger.error("Kubernetes: Client initialization failed", error as Error);

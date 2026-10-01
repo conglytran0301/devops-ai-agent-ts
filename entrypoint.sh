@@ -119,7 +119,7 @@ fi
 
 # Run analysis and capture exit code
 set +e  
-python3 /app/main.py
+node /app/dist/main.js
 PYTHON_EXIT_CODE=$?
 set -e  
 

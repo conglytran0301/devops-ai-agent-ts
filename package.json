@@ -10,9 +10,12 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.109.1",
     "@kubernetes/client-node": "^2.0.0",
     "@strands-agents/sdk": "^1.4.0",
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "openai": "^6.49.0",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

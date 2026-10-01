@@ -147,8 +147,7 @@ outputs:
 
 runs:
   using: 'docker'
-  ## image: 'Dockerfile'
-  image: 'docker://ghcr.io/roxsross/ai-driven-devops:latest'
+  image: 'Dockerfile'
   args:
     - ${{ inputs.simulation-mode }}
     - ${{ inputs.blocking-mode }}

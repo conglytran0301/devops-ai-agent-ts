@@ -5,9 +5,13 @@ on:
     branches: [main]
     paths:
       - 'Dockerfile'
-      - 'requirements.txt'
+      - 'entrypoint.sh'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
       - 'src/**'
       - 'action.yml'
+      - '.github/workflows/ai-gate-image.yml'
   workflow_dispatch:
     inputs:
       test_level:
@@ -22,51 +26,34 @@ on:
 
 permissions:
   contents: read
-  packages: write
   actions: read
 
 jobs:
   build:
-    name: 🏗️ Build Docker Image
+    name: 🏗️ Build Docker Image (validation)
     runs-on: ubuntu-latest
-    outputs:
-      image-digest: ${{ steps.build.outputs.digest }}
-    
+
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
-      
-      - name: 🔧 Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      
+
       - name: 🔧 Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-              
-      - name: 🔐 Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_TOKEN }} 
-      
-      - name: 🏗️ Build and push multi-arch image
+
+      - name: 🏗️ Build image (no push)
         id: build
         uses: docker/build-push-action@v5
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/roxsross/ai-driven-devops:latest
-            ghcr.io/roxsross/ai-driven-devops:${{ github.sha }}
+          platforms: linux/amd64
+          push: false
+          tags: ai-driven-devops-ts:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      
+
       - name: ✅ Build Complete
         run: |
-          echo "✅ Multi-arch image published successfully"
-          echo "📦 Image: ghcr.io/roxsross/ai-driven-devops:latest"
-          echo "🔗 Digest: ${{ steps.build.outputs.digest }}"
+          echo "✅ Docker image built successfully (validation only, not pushed)"
 
   # Quick smoke test
   smoke-test:
@@ -172,10 +159,9 @@ jobs:
           echo "### 📦 Build Results" >> $GITHUB_STEP_SUMMARY
           echo "| Component | Status | Details |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|--------|---------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Docker Build | ${{ needs.build.result == 'success' && '✅ Success' || '❌ Failed' }} | Multi-arch image published |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Build | ${{ needs.build.result == 'success' && '✅ Success' || '❌ Failed' }} | Image build validated (not pushed) |" >> $GITHUB_STEP_SUMMARY
           echo "| Smoke Test | ${{ needs.smoke-test.result == 'success' && '✅ Passed' || '❌ Failed' }} | Basic functionality validated |" >> $GITHUB_STEP_SUMMARY
           echo "| AI Gate Example | ${{ needs.ai-gate-example.result == 'success' && '✅ Passed' || '❌ Failed' }} | Multi-provider AI testing |" >> $GITHUB_STEP_SUMMARY
-          echo "| Scenario Tests | ${{ needs.scenario-tests.result == 'success' && '✅ Passed' || needs.scenario-tests.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} | Different threshold scenarios |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           # Overall status
@@ -184,16 +170,13 @@ jobs:
              [ "${{ needs.ai-gate-example.result }}" = "success" ]; then
             echo "### 🎉 Overall Status: BUILD & TESTS SUCCESSFUL" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "✅ **Docker image built and published**" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **Docker image built**" >> $GITHUB_STEP_SUMMARY
             echo "✅ **Action functionality validated**" >> $GITHUB_STEP_SUMMARY
             echo "✅ **AI Gate example tests passed**" >> $GITHUB_STEP_SUMMARY
             echo "✅ **Multi-provider compatibility confirmed**" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "🚀 **The action is ready for production use!**" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### 📦 Published Images" >> $GITHUB_STEP_SUMMARY
-            echo "- \`ghcr.io/roxsross/ai-driven-devops:latest\`" >> $GITHUB_STEP_SUMMARY
-            echo "- \`ghcr.io/roxsross/ai-driven-devops:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
           else
             echo "### ⚠️ Overall Status: SOME ISSUES DETECTED" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
@@ -204,7 +187,7 @@ jobs:
           
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📈 Next Steps" >> $GITHUB_STEP_SUMMARY
-          echo "- Use the action in your workflows: \`uses: roxsross/ai-driven-devops@main\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Use the action in your workflows: \`uses: conglytran0301/devops-ai-agent-ts@main\`" >> $GITHUB_STEP_SUMMARY
           echo "- Check out the templates in \`examples-workflows/templates/\`" >> $GITHUB_STEP_SUMMARY
           echo "- Run integration tests with real secrets if needed" >> $GITHUB_STEP_SUMMARY
           echo "- Review documentation for advanced usage" >> $GITHUB_STEP_SUMMARY
@@ -214,7 +197,6 @@ jobs:
         run: |
           echo "🎉 BUILD & TEST PIPELINE COMPLETED SUCCESSFULLY!"
           echo ""
-          echo "📦 Docker image published: ghcr.io/roxsross/ai-driven-devops:latest"
           echo "🧪 All tests passed successfully"
           echo "🤖 AI Gate functionality validated"
           echo "🚀 Action is ready for production use"

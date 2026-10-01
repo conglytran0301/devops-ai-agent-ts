@@ -63,9 +63,9 @@ export function setGithubOutput(name: string, value: string): void {
 /** Generate the final analysis summary and deployment decision. */
 export function generateFinalSummary(
   healthAnalysis: HealthAnalysis,
-  blockingIssues: AiInsight[],
-  warningIssues: AiInsight[],
-  blockingMode: boolean
+  blockingIssues: readonly string[],
+  warningIssues: readonly string[],
+  blockingMode: boolean,
 ): void {
   logger.separator("=", 80);
   logger.section("AI-DRIVEN OBSERVABILITY ANALYSIS COMPLETE");

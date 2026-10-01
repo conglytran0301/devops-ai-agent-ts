@@ -30,6 +30,7 @@ export interface AiInsight {
   impact: string;
   blocking?: boolean;
   node?: string;
+  severity?: string;
 }
 
 export interface HealthAnalysis {

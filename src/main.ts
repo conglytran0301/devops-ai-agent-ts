@@ -288,33 +288,26 @@ async function main(): Promise<void> {
 
   let aiRecommendsBlock = false;
 
-  const blockingInsights: AiInsight[] = [];
-const warningInsights: AiInsight[] = [];
-
 const blockingIssues: string[] = [];
 const warningIssues: string[] = [];
 
 for (const insight of healthAnalysis.aiInsights) {
-  const message = insight.message;
-
-  if (insight.blocking === true || insight.impact === "high") {
-    blockingInsights.push(insight);
-    blockingIssues.push(message);
-  } else {
-    warningInsights.push(insight);
-    warningIssues.push(message);
+  if (insight.blocking === true || insight.severity === "critical") {
+    blockingIssues.push(insight.message);
+  } else if (insight.severity === "warning") {
+    warningIssues.push(insight.message);
   }
 }
 
-  for (const [podName, podInfo] of Object.entries(healthAnalysis.pods)) {
-    if (!podInfo.ready) {
-      const issues = podInfo.containerIssues ?? [];
-      if (issues.length > 0) {
-        blockingIssues.push(`Pod ${podName}: ${issues.join(", ")}`);
-      } else {
-        blockingIssues.push(`Pod ${podName}: ${podInfo.phase ?? "Unknown"} state`);
-      }
+    for (const [podName, podInfo] of Object.entries(healthAnalysis.pods)) {
+  if (!podInfo.ready) {
+    const issues = podInfo.containerIssues ?? [];
+    if (issues.length > 0) {
+      blockingIssues.push(`Pod ${podName}: ${issues.join(", ")}`);
+    } else {
+      blockingIssues.push(`Pod ${podName}: ${podInfo.phase ?? "Unknown"} state`);
     }
+  }
 
     const restarts = podInfo.restarts ?? 0;
     if (restarts > 5) {
@@ -463,7 +456,7 @@ for (const insight of healthAnalysis.aiInsights) {
       console.log(`\n[DECISION] Final Decision: ${finalDecision}`);
     } else {
       const result = await agent.invoke(query);
-      const aiResponse = String(result.lastMessage ?? result);
+      const aiResponse = result.toString();
       console.log(aiResponse);
 
       if (
@@ -516,8 +509,8 @@ for (const insight of healthAnalysis.aiInsights) {
       }
     }
 
-        generateFinalSummary(healthAnalysis, blockingInsights, warningInsights, BLOCKING_MODE);
-
+    generateFinalSummary(healthAnalysis, blockingIssues, warningIssues, BLOCKING_MODE);
+    
     if (BLOCKING_MODE) {
       if (blockingIssues.length > 0 || aiRecommendsBlock) {
         exitCode = 1;
